@@ -52,3 +52,34 @@ setInterval(updateDashboard, 1000);
 
 // Run once immediately so we don't wait 1 second for first render
 updateDashboard();
+// Sidebar Toggle Logic
+const menuToggle = document.getElementById('menuToggle');
+const sidebar = document.getElementById('sidebar');
+
+menuToggle.addEventListener('click', () => {
+    sidebar.classList.toggle('active');
+    
+    // Optional: Animate hamburger into an 'X'
+    const spans = menuToggle.querySelectorAll('.hamburger span');
+    sidebar.classList.contains('active') ? transformToX(spans) : resetHamburger(spans);
+});
+
+function transformToX(spans) {
+    spans[0].style.transform = "rotate(45deg) translate(5px, 6px)";
+    spans[1].style.opacity = "0";
+    spans[2].style.transform = "rotate(-45deg) translate(5px, -6px)";
+}
+
+function resetHamburger(spans) {
+    spans[0].style.transform = "none";
+    spans[1].style.opacity = "1";
+    spans[2].style.transform = "none";
+}
+
+// Close sidebar when clicking outside
+document.addEventListener('click', (e) => {
+    if (!sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
+        sidebar.classList.remove('active');
+        resetHamburger(menuToggle.querySelectorAll('.hamburger span'));
+    }
+});

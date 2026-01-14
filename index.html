@@ -7,6 +7,35 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <div class="menu-toggle" id="menuToggle">
+    <div class="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+    <span class="logo-text">AmpereLog</span>
+</div>
+
+<div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <h2>System Access</h2>
+    </div>
+    <div class="sidebar-content">
+        <div class="user-profile">
+            <div class="profile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            </div>
+            <span>Guest_User_01</span>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item">
+                <span>Profile Settings</span>
+            </a>
+            <button class="login-btn">Log In / Register</button>
+        </nav>
+    </div>
+</div>
 
     <div class="dashboard-container">
         <header>
@@ -22,7 +51,7 @@
                     State of Charge (SOC)
                 </div>
                 <div class="value-large soc-value">
-                    <span id="socDisplay">82</span><span class="unit">%</span>
+                    <span id="socDisplay"></span><span class="unit">%</span>
                 </div>
                 <div class="battery-bar-container">
                     <div class="battery-fill" id="socBar"></div>
@@ -52,7 +81,7 @@
         </div>
 
         <div class="footer-note">
-            System ID: EV-X99 • Last Sync: Just now
+            
         </div>
     </div>
 
