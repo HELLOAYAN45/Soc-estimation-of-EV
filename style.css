@@ -1,1 +1,130 @@
+/* --- CSS VARIABLES --- */
+:root {
+    --bg-color: #0f172a;       /* Dark Slate */
+    --card-bg: #1e293b;        /* Lighter Slate Card */
+    --text-primary: #f1f5f9;   /* White Text */
+    --text-secondary: #94a3b8; /* Muted Text */
+    --accent-green: #10b981;   /* Emerald Green (SOC) */
+    --accent-blue: #3b82f6;    /* Blue (Duration) */
+    --font-main: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
 
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-main);
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.dashboard-container {
+    width: 100%;
+    max-width: 900px;
+}
+
+/* Header Styles */
+header {
+    margin-bottom: 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 15px;
+}
+
+h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.status-badge {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--accent-green);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* Grid Layout */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+/* Card Styling */
+.card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+.card-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.value-large {
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+.unit {
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+/* Specific Metric Colors */
+.soc-value { color: var(--accent-green); }
+.temp-value { color: var(--text-primary); }
+.duration-value { color: var(--accent-blue); }
+
+/* Battery Bar Animation */
+.battery-bar-container {
+    width: 100%;
+    height: 8px;
+    background-color: #334155;
+    border-radius: 4px;
+    margin-top: 15px;
+    overflow: hidden;
+}
+
+.battery-fill {
+    height: 100%;
+    background-color: var(--accent-green);
+    width: 82%; /* Default width, updated by JS */
+    border-radius: 4px;
+    transition: width 0.5s ease-in-out;
+}
+
+.footer-note {
+    margin-top: 30px;
+    text-align: center;
+    color: #475569;
+    font-size: 0.8rem;
+}
