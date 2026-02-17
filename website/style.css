@@ -1,0 +1,317 @@
+/* --- CSS VARIABLES --- */
+:root {
+    --bg-color: #0f172a;       /* Dark Slate */
+    --card-bg: #07023872;      /* Lighter Slate Card */
+    --text-primary: #f1f5f9;   /* White Text */
+    --text-secondary: #f3f4f5; /* Muted Text */
+    --accent-green: #11d9be;   /* Blueish Emerald Green (SOC) */
+    --accent-blue: #3b82f6;    /* Blue (Duration) */
+    --text-shadow: 0 0 10px #00e6e6, 0 0 20px #00e6e6;
+    --font-main: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-main);
+    color: var(--text-primary);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+    font-weight: bold;
+    
+    /* MODIFIED FOR VIDEO BACKGROUND */
+    background-color: #000; /* Fallback color */
+    overflow-x: hidden; /* Prevents scrollbars from video positioning */
+}
+
+/* --- VIDEO BACKGROUND STYLES --- */
+.video-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* Ensures video fills screen without stretching */
+    z-index: -10; /* Puts video behind EVERYTHING */
+}
+
+.video-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.4); /* Darkens the video so text pops */
+    z-index: -5; /* Sits between video and content */
+    pointer-events: none; /* Allows clicks to pass through */
+}
+
+.dashboard-container {
+    width: 100%;
+    max-width: 900px;
+    color: #ffffff;
+}
+
+/* Header Styles */
+header {
+    margin-bottom: 30px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 15px;
+}
+
+h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.status-badge {
+    background: rgba(2, 83, 79, 0.2);
+    color: var(--accent-green);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* Grid Layout */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+/* --- CARD STYLES (Clean Zoom Effect) --- */
+.card {
+    background: rgba(7, 2, 56, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    padding: 40px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+    
+    /* Smooth transition for zoom, shadow, and border color */
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+    
+    position: relative;
+    z-index: 1; 
+    overflow: hidden; 
+}
+
+/* Hover State: The "Zooming" Effect */
+.card:hover {
+    /* Lifts up (-5px) AND Scales up (5% bigger) */
+    transform: translateY(-5px) scale(1.05); 
+    
+    /* Stronger shadow and brighter border on hover */
+    box-shadow: 0 15px 40px rgba(59, 130, 246, 0.2); 
+    border-color: rgba(59, 130, 246, 0.5); /* Blue border tint */
+    background-color: rgba(7, 2, 56, 0.6);
+}
+
+/* Card Content Styling */
+.card-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.value-large {
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+.unit {
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+/* Specific Metric Colors */
+.soc-value { color: var(--accent-green); }
+.temp-value { color: var(--text-primary); }
+.duration-value { color: var(--accent-blue); }
+
+/* Battery Bar Animation */
+.battery-bar-container {
+    width: 100%;
+    height: 8px;
+    background-color: #334155;
+    border-radius: 4px;
+    margin-top: 15px;
+    overflow: hidden;
+}
+
+.battery-fill {
+    box-shadow: 0 0 15px var(--accent-green);
+    animation: battery-pulse 2s infinite alternate;
+    height: 100%;
+    width: 0%; /* Note: This width is usually controlled by JS */
+    background-color: var(--accent-green);
+}
+
+@keyframes battery-pulse {
+    from { opacity: 0.8; filter: brightness(1); }
+    to { opacity: 1; filter: brightness(1.5); }
+}
+
+.footer-note {
+    margin-top: 50px;
+    text-align: center;
+    color: #475569;
+    font-size: 0.8rem;
+}
+
+/* --- SIDEBAR & MENU STYLES --- */
+
+.menu-toggle {
+    position: fixed;
+    top: 25px;
+    left: 25px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    cursor: pointer;
+    background: rgba(7, 2, 56, 0.4);
+    padding: 10px 20px;
+    border-radius: 50px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: 0.1s;
+}
+
+.menu-toggle:hover {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
+}
+
+.logo-text {
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--text-primary);
+    text-shadow: 0 0 10px var(--accent-blue);
+}
+
+/* 3-Line Hamburger */
+.hamburger {
+    width: 25px;
+    height: 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.hamburger span {
+    display: block;
+    height: 2px;
+    width: 100%;
+    background-color: var(--accent-blue);
+    border-radius: 2px;
+    transition: 0.3s;
+}
+
+/* Sidebar Container */
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: -320px; 
+    width: 300px;
+    height: 100vh;
+    background: rgba(7, 2, 56, 0.85);
+    backdrop-filter: blur(25px);
+    z-index: 999;
+    padding: 100px 30px 30px 30px;
+    transition: 0.5s cubic-bezier(0.77, 0, 0.175, 1);
+    border-right: 1px solid var(--accent-blue);
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar.active {
+    left: 0;
+}
+
+/* Sidebar Content */
+.sidebar-header h2 {
+    font-size: 1rem;
+    color: var(--accent-blue);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 30px;
+}
+
+.user-profile {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 30px;
+}
+
+.profile-icon {
+    width: 40px;
+    height: 40px;
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.nav-item {
+    color: var(--text-primary);
+    text-decoration: none;
+    padding: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: 0.3s;
+}
+
+.nav-item:hover {
+    color: var(--accent-blue);
+    padding-left: 20px;
+}
+
+.login-btn {
+    margin-top: 20px;
+    background: var(--accent-blue);
+    color: white;
+    border: none;
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+    transition: 0.3s;
+}
+
+.login-btn:hover {
+    transform: scale(1.05);
+    filter: brightness(1.2);
+}
