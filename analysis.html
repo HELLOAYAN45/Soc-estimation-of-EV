@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battery Analysis - AmpereLog</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; overflow-x: hidden; }
+        .video-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; opacity: 0.4; }
+        
+        .dashboard-container {
+            max-width: 900px; margin: 40px auto; padding: 30px;
+            background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(20px);
+            border-radius: 24px; border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .upload-zone {
+            border: 2px dashed #3b82f6; padding: 40px; text-align: center;
+            border-radius: 16px; background: rgba(59, 130, 246, 0.05);
+            cursor: pointer; transition: 0.3s;
+        }
+        .upload-zone:hover { background: rgba(59, 130, 246, 0.1); }
+
+        .mapper-box { margin-top: 20px; background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display: none; }
+        .mapper-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin: 15px 0; }
+        select { width: 100%; padding: 8px; background: #1e293b; border: 1px solid #475569; color: white; border-radius: 6px; }
+
+        .controls-grid { display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap; }
+        .input-group { flex: 1; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 12px; min-width: 180px; }
+        input { width: 100%; background: transparent; border: none; color: white; font-size: 1.2rem; text-align: center; outline: none; }
+        
+        .btn-action { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+        .btn-train { background: #3b82f6; color: white; }
+        .btn-predict { background: #10b981; color: white; display: none; }
+        .btn-action:hover { transform: scale(1.02); }
+
+        .toggle-container { display: flex; gap: 5px; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 8px; }
+        .toggle-btn { flex: 1; padding: 8px; background: transparent; border: none; color: #94a3b8; cursor: pointer; border-radius: 6px; }
+        .toggle-btn.active { background: #3b82f6; color: white; }
+
+        .highlights-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 20px; text-align: center; display: none; }
+        .highlight-card { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; }
+        .highlight-val { color: #10b981; font-weight: bold; font-size: 1.1rem; }
+
+        /* GRAPH STYLE */
+        .chart-wrapper { margin-top: 30px; height: 300px; display: none; }
+        
+        /* OR DIVIDER */
+        .or-divider { display: flex; align-items: center; text-align: center; color: #94a3b8; margin: 15px 0; }
+        .or-divider::before, .or-divider::after { content: ''; flex: 1; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .or-divider:not(:empty)::before { margin-right: .5em; }
+        .or-divider:not(:empty)::after { margin-left: .5em; }
+
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 10px auto; display: none; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <video autoplay muted loop playsinline class="video-bg"><source src="car-rain.mp4" type="video/mp4"></video>
+
+    <div class="dashboard-container">
+        <h1 style="text-align:center; margin-bottom: 5px;">AI Battery Trainer</h1>
+        <p style="text-align:center; color:#94a3b8; margin-top:0;">Upload log -> Map Columns -> Train AI</p>
+
+        <div class="upload-zone" onclick="document.getElementById('csvInput').click()">
+            <div style="font-size: 2rem;">📁</div>
+            <h3 id="uploadText" style="margin:10px 0; color: #3b82f6;">Upload Battery CSV</h3>
+            <input type="file" id="csvInput" accept=".csv" style="display:none">
+        </div>
+
+        <div id="mapperBox" class="mapper-box">
+            <h4 style="margin:0; color:#10b981;">⚙️ Map Your Data</h4>
+            <div class="mapper-grid">
+                <div><label>Time</label><select id="mapTime"></select></div>
+                <div><label>Voltage</label><select id="mapVolts"></select></div>
+                <div><label>Current</label><select id="mapAmps"></select></div>
+                <div><label>Temp</label><select id="mapTemp"></select></div>
+                <div><label>SoC</label><select id="mapSoc"></select></div>
+            </div>
+            
+            <div class="input-group" style="text-align:center;">
+                <label>Select AI Model</label>
+                <div class="toggle-container" style="margin-top:10px;">
+                    <button id="btnFast" class="toggle-btn active" onclick="setMode('fast')">⚡ FAST (XGB)</button>
+                    <button id="btnPro" class="toggle-btn" onclick="setMode('pro')">🧠 PRO (GRU)</button>
+                </div>
+            </div>
+
+            <button class="btn-action btn-train" onclick="trainModel()">Start Training</button>
+            <div id="trainLoader" class="loader"></div>
+            <p id="trainStatus" style="text-align:center; color:#94a3b8; font-size:0.9rem; margin-top:5px;"></p>
+        </div>
+
+        <div id="highlightsBox" class="highlights-grid">
+            <div class="highlight-card"><div style="font-size:0.8rem">100% Lasts</div><div id="hl-100" class="highlight-val">--</div></div>
+            <div class="highlight-card"><div style="font-size:0.8rem">50% Lasts</div><div id="hl-50" class="highlight-val">--</div></div>
+            <div class="highlight-card"><div style="font-size:0.8rem">25% Lasts</div><div id="hl-25" class="highlight-val">--</div></div>
+            <div class="highlight-card"><div style="font-size:0.8rem">5% Lasts</div><div id="hl-5" class="highlight-val">--</div></div>
+        </div>
+
+        <div id="chartContainer" class="chart-wrapper">
+            <canvas id="socGraph"></canvas>
+        </div>
+
+        <div id="predictZone" style="display:none; margin-top:30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top:20px;">
+            <h3 style="text-align:center;">🔮 Live Prediction</h3>
+            
+            <div class="controls-grid">
+                <div class="input-group">
+                    <label>Voltage (V)</label>
+                    <input type="number" id="predVolts" step="0.01" placeholder="e.g 11.2">
+                </div>
+                <div class="input-group">
+                    <label>Current (A)</label>
+                    <input type="number" id="predAmps" value="0.5" step="0.1">
+                </div>
+            </div>
+
+            <div class="or-divider">OR</div>
+
+            <div class="input-group" style="max-width: 50%; margin: 0 auto;">
+                <label>Current SoC (%)</label>
+                <input type="number" id="predSoc" step="1" placeholder="Enter % directly">
+            </div>
+
+            <button class="btn-action btn-predict" style="display:block;" onclick="predict()">Calculate Remaining Time</button>
+            
+            <div id="predResult" style="text-align:center; margin-top:20px; display:none;">
+                <div id="resTime" style="font-size:2rem; font-weight:bold; color:#3b82f6;"></div>
+                <div id="resSoc" style="color:#94a3b8;"></div>
+            </div>
+        </div>
+
+    </div>
+    <script src="analysis.js"></script>
+</body>
+</html>
