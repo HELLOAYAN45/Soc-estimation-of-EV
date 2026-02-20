@@ -1,85 +1,86 @@
-// Select DOM elements
-const socDisplay = document.getElementById('socDisplay');
-const socBar = document.getElementById('socBar');
-const tempDisplay = document.getElementById('tempDisplay');
-const durationDisplay = document.getElementById('durationDisplay');
+let liveChart = null;
+let lastDataTime = 0; // To track connection
 
-// Initial State
-let soc = 82;
-let temp = 34.0;
-let durationSeconds = 2700; // Starts at 45 minutes (for demo)
+// Initialize the Live Chart
+function initLiveChart() {
+    const ctx = document.getElementById('liveChart').getContext('2d');
+    liveChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'Predicted SoC %', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.2)', fill: true, tension: 0.4 }] },
+        options: { responsive: true, maintainAspectRatio: false, scales: { x: { title: { display: true, text: 'Mins Remaining' } } } }
+    });
+}
 
-function updateDashboard() {
-    // 1. Update Duration
-    durationSeconds++;
-    const hours = Math.floor(durationSeconds / 3600);
-    const minutes = Math.floor((durationSeconds % 3600) / 60);
-    
-    // Format time as HH:MM
-    const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-    durationDisplay.innerText = formattedTime;
+// Fetch the projected curve data
+async function updateLiveCurve() {
+    try {
+        const res = await fetch('/live_curve_data');
+        const d = await res.json();
+        liveChart.data.labels = d.times;
+        liveChart.data.datasets[0].data = d.socs;
+        liveChart.update();
+    } catch (e) {}
+}
 
-    // 2. Simulate Temperature Fluctuation (Random small changes)
-    if (Math.random() > 0.7) {
-        // Change temp by small amount (-0.2 to +0.2)
-        let change = (Math.random() - 0.5) * 0.4;
-        temp = temp + change;
+// Fetch real-time hardware data
+async function update() {
+    try {
+        const res = await fetch('/get_data');
+        const data = await res.json();
         
-        // Keep temp within realistic bounds (e.g., 30C to 45C)
-        if (temp < 30) temp = 30;
-        if (temp > 45) temp = 45;
+        // Update Connection Status (Green)
+        lastDataTime = Date.now();
+        document.getElementById('connStatus').innerText = "🟢 Connected";
+        document.getElementById('connStatus').className = "status-badge connected";
 
-        tempDisplay.innerText = temp.toFixed(1);
+        // Update UI Numbers
+        document.getElementById('socDisplay').innerText = data.soc.toFixed(1);
+        document.getElementById('socBar').style.width = data.soc + "%";
+        document.getElementById('voltDisplay').innerText = data.voltage.toFixed(2);
+        document.getElementById('tempDisplay').innerText = data.temp.toFixed(1);
+
+        // --- ALERTS ENGINE ---
+        let alertHTML = "";
+        if (data.soc < 10.0) {
+            alertHTML += `<div class="alert alert-danger">⚠️ LOW VOLTAGE ALERT: Battery SoC is below 10%. Please charge the battery immediately!</div>`;
+        }
+        if (data.temp >= 40.0) {
+            alertHTML += `<div class="alert alert-warning">🔥 OVERTEMP ALERT: Battery is overheating at ${data.temp.toFixed(1)}°C!</div>`;
+        }
+        document.getElementById('alertContainer').innerHTML = alertHTML;
+
+        // Fetch new curve data every cycle
+        updateLiveCurve();
+
+    } catch (e) {}
+}
+
+// Connection Timeout Checker
+setInterval(() => {
+    if (Date.now() - lastDataTime > 3000) {
+        document.getElementById('connStatus').innerText = "🔴 Disconnected";
+        document.getElementById('connStatus').className = "status-badge disconnected";
     }
+}, 1000);
 
-    // 3. Update Visual Battery Bar
-    // In a real app, this would come from the API.
-    // We simply sync the width of the bar to the SOC percentage.
-    socBar.style.width = soc + "%";
-    
-    // Optional: Change bar color if SOC is low
-    if (soc < 20) {
-        socBar.style.backgroundColor = '#ef4444'; // Red
-        socDisplay.style.color = '#ef4444';
+async function toggleGeneration() {
+    const minV = document.getElementById('minV').value || 9.0;
+    const res = await fetch('/toggle_gen', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ min_v: minV })
+    });
+    const status = await res.json();
+    const btn = document.getElementById('genBtn');
+    if (status.is_recording) {
+        btn.innerText = "Stop Recording";
+        btn.classList.add('recording');
     } else {
-        socBar.style.backgroundColor = '#10b981'; // Green
-        socDisplay.style.color = '#10b981';
+        btn.innerText = "Start Recording";
+        btn.classList.remove('recording');
+        document.getElementById('dlBtn').style.display = "block";
     }
 }
 
-// Run updateDashboard every 1000 milliseconds (1 second)
-setInterval(updateDashboard, 1000);
-
-// Run once immediately so we don't wait 1 second for first render
-updateDashboard();
-// Sidebar Toggle Logic
-const menuToggle = document.getElementById('menuToggle');
-const sidebar = document.getElementById('sidebar');
-
-menuToggle.addEventListener('click', () => {
-    sidebar.classList.toggle('active');
-    
-    // Optional: Animate hamburger into an 'X'
-    const spans = menuToggle.querySelectorAll('.hamburger span');
-    sidebar.classList.contains('active') ? transformToX(spans) : resetHamburger(spans);
-});
-
-function transformToX(spans) {
-    spans[0].style.transform = "rotate(45deg) translate(5px, 6px)";
-    spans[1].style.opacity = "0";
-    spans[2].style.transform = "rotate(-45deg) translate(5px, -6px)";
-}
-
-function resetHamburger(spans) {
-    spans[0].style.transform = "none";
-    spans[1].style.opacity = "1";
-    spans[2].style.transform = "none";
-}
-
-// Close sidebar when clicking outside
-document.addEventListener('click', (e) => {
-    if (!sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
-        sidebar.classList.remove('active');
-        resetHamburger(menuToggle.querySelectorAll('.hamburger span'));
-    }
-});
+// Start everything
+initLiveChart();
+setInterval(update, 1000);

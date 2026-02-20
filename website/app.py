@@ -1,218 +1,159 @@
-import os
-import uuid
+import os, datetime, uuid, joblib
 import pandas as pd
 import numpy as np
-import joblib
-import xgboost as xgb
-import tensorflow as tf
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from sklearn.preprocessing import MinMaxScaler
+import xgboost as xgb
+import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import GRU, Dense
 
-# --- SERVE STATIC FILES FROM CURRENT FOLDER ---
 app = Flask(__name__, static_folder='.')
 CORS(app)
 
 os.makedirs('uploads', exist_ok=True)
 os.makedirs('models', exist_ok=True)
 
-# --- 1. SERVE THE HTML FILE ---
+latest_sensor_data = {"voltage": 0.0, "current": 0.0, "temp": 0.0, "soc": 0.0}
+is_recording = False
+recording_session = []
+v_threshold = 9.0
+
+# --- NAVIGATION ROUTES ---
 @app.route('/')
-def index():
+def index(): 
+    return send_from_directory('.', 'index.html')
+
+@app.route('/analysis')
+def analysis_page(): 
     return send_from_directory('.', 'analysis.html')
 
+# --- THIS IS THE FIX: Serves your CSS, JS, and MP4 files ---
 @app.route('/<path:path>')
 def send_static(path):
     return send_from_directory('.', path)
 
-# --- 2. UPLOAD ---
+# --- HARDWARE BRIDGE ---
+@app.route('/live_data', methods=['POST'])
+def receive_data():
+    global latest_sensor_data, is_recording, recording_session
+    data = request.get_json()
+    v, i, t = round(data.get('voltage', 0.0), 2), round(data.get('current', 0.0), 2), round(data.get('temp', 0.0), 1)
+    
+    # 3S Li-ion Logic: 9.0V to 12.6V
+    soc_calc = round(max(0, min(100, ((v - 9.0) / (12.6 - 9.0)) * 100)), 1)
+    latest_sensor_data.update({"voltage": v, "current": i, "temp": t, "soc": soc_calc})
+
+    if is_recording:
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        recording_session.append({"time": timestamp, "voltage": v, "current": i, "temp": t, "soc": soc_calc})
+        if v <= v_threshold: is_recording = False
+    return jsonify({"status": "success", "recording": is_recording}), 200
+
+@app.route('/get_data')
+def get_data(): return jsonify(latest_sensor_data)
+
+# --- LIVE PROJECTED CURVE ---
+@app.route('/live_curve_data')
+def live_curve_data():
+    v, i, soc = latest_sensor_data['voltage'], latest_sensor_data['current'], latest_sensor_data['soc']
+    draw = i if i > 0.1 else 0.5 
+    remaining_ah = 2.0 * (soc / 100.0)
+    mins_left = int((remaining_ah / draw) * 60) if draw > 0 else 0
+    
+    times, socs = [], []
+    for step in range(11):
+        fraction = step / 10.0
+        times.append(int(mins_left * fraction))
+        socs.append(round(soc - (soc * fraction), 1))
+        
+    return jsonify({"times": times, "socs": socs, "mins_left": mins_left})
+
+# --- CSV GENERATION ---
+@app.route('/toggle_gen', methods=['POST'])
+def toggle_gen():
+    global is_recording, recording_session, v_threshold
+    req = request.json
+    v_threshold = float(req.get('min_v', 9.0))
+    is_recording = not is_recording
+    if is_recording: recording_session = []
+    return jsonify({"is_recording": is_recording})
+
+@app.route('/download_csv')
+def download_csv():
+    df = pd.DataFrame(recording_session)
+    df.to_csv('ev_session.csv', index=False)
+    return send_file('ev_session.csv', as_attachment=True)
+
+# --- AI TRAINING & PREDICTION ---
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
+    user_id = str(uuid.uuid4())
+    path = os.path.join('uploads', f"{user_id}.csv")
+    file.save(path)
+    df = pd.read_csv(path)
+    return jsonify({"user_id": user_id, "headers": df.columns.tolist()})
 
-    try:
-        user_id = str(uuid.uuid4())
-        file_path = os.path.join('uploads', f"{user_id}.csv")
-        file.save(file_path)
-        df = pd.read_csv(file_path)
-        return jsonify({"status": "success", "user_id": user_id, "headers": df.columns.tolist()})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# --- 3. TRAIN (With Graph Data) ---
 @app.route('/train', methods=['POST'])
-def train_model():
-    data = request.json
-    user_id = data.get('user_id')
-    mapping = data.get('mapping') 
-    model_type = data.get('model_type', 'fast')
-
-    csv_path = os.path.join('uploads', f"{user_id}.csv")
-    if not os.path.exists(csv_path):
-        return jsonify({"error": "File missing"}), 404
-
+def train():
     try:
-        df = pd.read_csv(csv_path)
+        data = request.json
+        uid, mapping, m_type = data['user_id'], data['mapping'], data['model_type']
+        df = pd.read_csv(os.path.join('uploads', f"{uid}.csv"))
         
-        # Map Columns
-        train_df = pd.DataFrame()
-        train_df['V'] = df[mapping['voltage']]
-        train_df['I'] = df[mapping['current']]
-        train_df['T'] = df[mapping['temp']]
-        train_df['SoC'] = df[mapping['soc']]
-        train_df['Time'] = df[mapping['time']]
+        X = df[[mapping['voltage'], mapping['current'], mapping['temp']]].values
+        y = df[mapping['soc']].values
+        time_data = df[mapping['time']].values
         
-        # Clean Data
-        train_df = train_df[train_df['V'] > 0]
-        
-        # Create Duration Map
-        max_time = train_df['Time'].max()
-        train_df['Remaining_Time'] = max_time - train_df['Time']
-        duration_map = train_df[['SoC', 'Remaining_Time']].sort_values('SoC').reset_index(drop=True)
-        joblib.dump(duration_map, f"models/{user_id}_duration.pkl")
+        duration_df = pd.DataFrame({"soc": y, "actual_time": time_data})
+        joblib.dump(duration_df, f"models/{uid}_duration.pkl")
 
-        # Train AI Model
-        X = train_df[['V', 'I', 'T']].values
-        y = train_df['SoC'].values
-        model_path = f"models/{user_id}_{model_type}"
-        
-        if model_type == 'fast':
-            model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100)
+        if m_type == 'fast':
+            model = xgb.XGBRegressor(n_estimators=100)
             model.fit(X, y)
-            model.save_model(f"{model_path}.json")
-            
-        elif model_type == 'pro':
-            scaler_X = MinMaxScaler()
-            scaler_y = MinMaxScaler()
-            X_scaled = scaler_X.fit_transform(X)
-            y_scaled = scaler_y.fit_transform(y.reshape(-1, 1))
-            joblib.dump(scaler_X, f"{model_path}_scalerX.pkl")
-            joblib.dump(scaler_y, f"{model_path}_scalerY.pkl")
+            model.save_model(f"models/{uid}_fast.json")
+        else:
+            scaler_X, scaler_y = MinMaxScaler(), MinMaxScaler()
+            X_s, y_s = scaler_X.fit_transform(X), scaler_y.fit_transform(y.reshape(-1, 1))
+            joblib.dump(scaler_X, f"models/{uid}_scalerX.pkl")
+            joblib.dump(scaler_y, f"models/{uid}_scalerY.pkl")
+            model = Sequential([GRU(32, input_shape=(1, 3)), Dense(1)])
+            model.compile(optimizer='adam', loss='mse')
+            model.fit(X_s.reshape(-1, 1, 3), y_s, epochs=10, verbose=0)
+            model.save(f"models/{uid}_pro.h5")
 
-            time_steps = 10
-            Xs, ys = [], []
-            for i in range(len(X) - time_steps):
-                Xs.append(X_scaled[i:(i + time_steps)])
-                ys.append(y_scaled[i + time_steps])
-
-            if(len(Xs) > 0):
-                model = Sequential()
-                model.add(GRU(50, activation='relu', input_shape=(time_steps, 3)))
-                model.add(Dense(1))
-                model.compile(optimizer='adam', loss='mse')
-                model.fit(np.array(Xs), np.array(ys), epochs=10, batch_size=32, verbose=0)
-                model.save(f"{model_path}.h5")
-
-        # Highlights
-        highlights = {}
-        for target in [100, 50, 25, 5]:
-            closest_idx = (duration_map['SoC'] - target).abs().idxmin()
-            rem_seconds = duration_map.iloc[closest_idx]['Remaining_Time']
-            highlights[f"{target}%"] = f"{round(rem_seconds/60, 1)} min"
-
-        # Graph Data (Optimize: send 1 point every ~500 rows for speed)
-        step = max(1, len(train_df) // 500)
-        graph_data = {
-            "time": train_df['Time'].iloc[::step].tolist(),
-            "soc": train_df['SoC'].iloc[::step].tolist()
-        }
-
+        step = max(1, len(y) // 50)
         return jsonify({
-            "status": "success", 
-            "highlights": highlights,
-            "max_voltage": float(train_df['V'].max()),
-            "graph_data": graph_data
+            "status": "success",
+            "graph_data": {"time": list(range(len(y[::step]))), "soc": y[::step].tolist()}
         })
+    except Exception as e: return jsonify({"error": str(e)}), 500
 
-    except Exception as e:
-        print(f"Train Error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-# --- 4. PREDICT (With Fix for Pro Model + Direct SoC) ---
-# --- 4. PREDICT ---
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
         data = request.json
-        user_id = data.get('user_id')
-        model_type = data.get('model_type', 'fast')
-        
-        # Inputs
-        direct_soc = data.get('soc') 
-        v = float(data.get('voltage', 0))
-        i = float(data.get('current', 0.5))
-        t = float(data.get('temp', 25.0))
-
-        model_path = f"models/{user_id}_{model_type}"
-        predicted_soc = 0.0
-        engine_used = ""
-
-        # A. DIRECT SOC MODE
-        if direct_soc is not None and str(direct_soc).strip() != "":
-            predicted_soc = float(direct_soc)
-            engine_used = "Direct Input"
-
-        # B. AI PREDICTION MODE
+        uid, m_type = data['user_id'], data.get('model_type', 'fast')
+        if data.get('soc'):
+            pred_soc = float(data['soc'])
         else:
-            if model_type == 'fast':
-                if not os.path.exists(f"{model_path}.json"):
-                     return jsonify({"error": "Fast model not trained yet"}), 400
-                model = xgb.XGBRegressor()
-                model.load_model(f"{model_path}.json")
-                pred = model.predict(np.array([[v, i, t]]))
-                predicted_soc = float(pred[0])
-                
-            elif model_type == 'pro':
-                if not os.path.exists(f"{model_path}.h5"):
-                     return jsonify({"error": "Pro model not trained yet. Click Train!"}), 400
-                
-                try:
-                    # Load Pro Resources
-                    model = tf.keras.models.load_model(f"{model_path}.h5", compile=False)
-                    scaler_X = joblib.load(f"{model_path}_scalerX.pkl")
-                    scaler_y = joblib.load(f"{model_path}_scalerY.pkl")
-                    
-                    # Prepare Input
-                    input_scaled = scaler_X.transform(np.array([[v, i, t]]))
-                    # Reshape: (1, 3) -> (1, 10, 3)
-                    input_seq = np.repeat(input_scaled, 10, axis=0).reshape(1, 10, 3)
-                    
-                    # Predict
-                    pred_scaled = model.predict(input_seq, verbose=0)
-                    pred_raw = scaler_y.inverse_transform(pred_scaled)
-                    
-                    predicted_soc = float(pred_raw[0][0])
-                except Exception as pro_error:
-                    print(f"PRO MODEL ERROR: {pro_error}")
-                    return jsonify({"error": f"Pro Model Failed: {str(pro_error)}"}), 500
-                
-            engine_used = f"{model_type.upper()} AI Model"
+            v, i, t = float(data['voltage']), float(data['current']), float(data['temp'])
+            if m_type == 'fast':
+                model = xgb.XGBRegressor(); model.load_model(f"models/{uid}_fast.json")
+                pred_soc = model.predict(np.array([[v, i, t]]))[0]
+            else:
+                model = tf.keras.models.load_model(f"models/{uid}_pro.h5")
+                sX, sY = joblib.load(f"models/{uid}_scalerX.pkl"), joblib.load(f"models/{uid}_scalerY.pkl")
+                X_val = sX.transform(np.array([[v, i, t]]))
+                pred_soc = sY.inverse_transform(model.predict(X_val.reshape(1,1,3)))[0][0]
 
-        # C. CALCULATE DURATION
-        duration_map = joblib.load(f"models/{user_id}_duration.pkl")
-        
-        # Handle case where predicted SoC is outside 0-100 range
-        predicted_soc = max(0, min(100, predicted_soc))
-        
-        closest_idx = (duration_map['SoC'] - predicted_soc).abs().idxmin()
-        time_remaining = float(duration_map.iloc[closest_idx]['Remaining_Time'])
-
-        return jsonify({
-            "soc": round(predicted_soc, 2),
-            "time_remaining_min": round(time_remaining / 60, 2),
-            "engine": engine_used
-        })
-
-    except Exception as e:
-        print(f"❌ General Prediction Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        duration_map = joblib.load(f"models/{uid}_duration.pkl")
+        closest_idx = (duration_map['soc'] - pred_soc).abs().idxmin()
+        time_rem = len(duration_map) - closest_idx
+        return jsonify({"soc": round(float(pred_soc), 1), "time_remaining_min": round(time_rem/60, 1)})
+    except Exception as e: return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    # use_reloader=False prevents restart loop on upload
-    app.run(port=5000, debug=True, host='0.0.0.0', use_reloader=False)
+    app.run(port=5000, debug=True, host='0.0.0.0')
