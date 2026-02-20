@@ -5,133 +5,130 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Battery Analysis - AmpereLog</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
     <style>
-        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; overflow-x: hidden; }
-        .video-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; opacity: 0.4; }
-        
-        .dashboard-container {
-            max-width: 900px; margin: 40px auto; padding: 30px;
-            background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(20px);
-            border-radius: 24px; border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .upload-zone {
-            border: 2px dashed #3b82f6; padding: 40px; text-align: center;
-            border-radius: 16px; background: rgba(59, 130, 246, 0.05);
-            cursor: pointer; transition: 0.3s;
-        }
+        /* Small overrides specific to this page to maintain your previous structure within the new cards */
+        .upload-zone { border: 2px dashed var(--accent-blue); padding: 40px; text-align: center; border-radius: 16px; background: rgba(59, 130, 246, 0.05); cursor: pointer; transition: 0.3s; margin-bottom: 20px;}
         .upload-zone:hover { background: rgba(59, 130, 246, 0.1); }
-
-        .mapper-box { margin-top: 20px; background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display: none; }
-        .mapper-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin: 15px 0; }
-        select { width: 100%; padding: 8px; background: #1e293b; border: 1px solid #475569; color: white; border-radius: 6px; }
-
-        .controls-grid { display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap; }
-        .input-group { flex: 1; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 12px; min-width: 180px; }
-        input { width: 100%; background: transparent; border: none; color: white; font-size: 1.2rem; text-align: center; outline: none; }
-        
-        .btn-action { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
-        .btn-train { background: #3b82f6; color: white; }
-        .btn-predict { background: #10b981; color: white; display: none; }
-        .btn-action:hover { transform: scale(1.02); }
-
-        .toggle-container { display: flex; gap: 5px; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 8px; }
-        .toggle-btn { flex: 1; padding: 8px; background: transparent; border: none; color: #94a3b8; cursor: pointer; border-radius: 6px; }
-        .toggle-btn.active { background: #3b82f6; color: white; }
-
+        .toggle-container { display: flex; gap: 5px; background: rgba(0,0,0,0.3); padding: 5px; border-radius: 8px; margin-top:10px;}
+        .toggle-btn { flex: 1; padding: 12px; background: transparent; border: none; color: #94a3b8; cursor: pointer; border-radius: 6px; font-weight: bold;}
+        .toggle-btn.active { background: var(--accent-blue); color: white; }
         .highlights-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 20px; text-align: center; display: none; }
-        .highlight-card { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; }
-        .highlight-val { color: #10b981; font-weight: bold; font-size: 1.1rem; }
-
-        /* GRAPH STYLE */
-        .chart-wrapper { margin-top: 30px; height: 300px; display: none; }
-        
-        /* OR DIVIDER */
-        .or-divider { display: flex; align-items: center; text-align: center; color: #94a3b8; margin: 15px 0; }
+        .highlight-card { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);}
+        .highlight-val { color: var(--accent-green); font-weight: bold; font-size: 1.3rem; margin-top: 5px;}
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--accent-blue); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 15px auto; display: none; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .or-divider { display: flex; align-items: center; text-align: center; color: #94a3b8; margin: 20px 0; }
         .or-divider::before, .or-divider::after { content: ''; flex: 1; border-bottom: 1px solid rgba(255,255,255,0.1); }
         .or-divider:not(:empty)::before { margin-right: .5em; }
         .or-divider:not(:empty)::after { margin-left: .5em; }
-
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 10px auto; display: none; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <video autoplay muted loop playsinline class="video-bg"><source src="car-rain.mp4" type="video/mp4"></video>
+    <div class="video-overlay"></div>
+
+    <header class="top-nav">
+        <div class="logo-text">AmpereLog AI LAB</div>
+        <nav class="nav-links">
+            <a href="/" class="nav-btn">Live Dashboard</a>
+            <a href="/analysis" class="nav-btn active">Manual Analysis</a>
+        </nav>
+        <div class="status-badge" style="border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(59, 130, 246, 0.15); box-shadow: 0 0 10px var(--accent-blue);">
+            🧠 AI LAB
+        </div>
+    </header>
 
     <div class="dashboard-container">
-        <h1 style="text-align:center; margin-bottom: 5px;">AI Battery Trainer</h1>
-        <p style="text-align:center; color:#94a3b8; margin-top:0;">Upload log -> Map Columns -> Train AI</p>
+        
+        <div class="card">
+            <h2 style="text-align:center; margin-bottom: 5px; color: var(--accent-blue);">AI Battery Trainer</h2>
+            <p style="text-align:center; color:var(--text-secondary); margin-top:0; margin-bottom: 25px;">Upload log -> Map Columns -> Train AI</p>
 
-        <div class="upload-zone" onclick="document.getElementById('csvInput').click()">
-            <div style="font-size: 2rem;">📁</div>
-            <h3 id="uploadText" style="margin:10px 0; color: #3b82f6;">Upload Battery CSV</h3>
-            <input type="file" id="csvInput" accept=".csv" style="display:none">
-        </div>
-
-        <div id="mapperBox" class="mapper-box">
-            <h4 style="margin:0; color:#10b981;">⚙️ Map Your Data</h4>
-            <div class="mapper-grid">
-                <div><label>Time</label><select id="mapTime"></select></div>
-                <div><label>Voltage</label><select id="mapVolts"></select></div>
-                <div><label>Current</label><select id="mapAmps"></select></div>
-                <div><label>Temp</label><select id="mapTemp"></select></div>
-                <div><label>SoC</label><select id="mapSoc"></select></div>
+            <div class="upload-zone" onclick="document.getElementById('csvInput').click()">
+                <div style="font-size: 2.5rem; margin-bottom: 10px;">📁</div>
+                <h3 id="uploadText" style="margin:10px 0; color: var(--accent-blue);">Upload Battery CSV</h3>
+                <input type="file" id="csvInput" accept=".csv" style="display:none">
             </div>
-            
-            <div class="input-group" style="text-align:center;">
-                <label>Select AI Model</label>
-                <div class="toggle-container" style="margin-top:10px;">
-                    <button id="btnFast" class="toggle-btn active" onclick="setMode('fast')">⚡ FAST (XGB)</button>
-                    <button id="btnPro" class="toggle-btn" onclick="setMode('pro')">🧠 PRO (GRU)</button>
+
+            <div id="mapperBox" style="display: none; text-align: left; margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <h3 style="margin:0 0 15px 0; color:var(--accent-green);">⚙️ Map Your Data</h3>
+                <div class="mapper-grid" style="margin-bottom: 20px;">
+                    <div class="map-item"><label>Time</label><select id="mapTime"></select></div>
+                    <div class="map-item"><label>Voltage</label><select id="mapVolts"></select></div>
+                    <div class="map-item"><label>Current</label><select id="mapAmps"></select></div>
+                    <div class="map-item"><label>Temp</label><select id="mapTemp"></select></div>
+                    <div class="map-item"><label>SoC</label><select id="mapSoc"></select></div>
                 </div>
-            </div>
+                
+                <div style="text-align:center; margin-bottom: 20px;">
+                    <label style="color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; font-weight: bold;">Select AI Model</label>
+                    <div class="toggle-container">
+                        <button id="btnFast" class="toggle-btn active" onclick="setMode('fast')">⚡ FAST (XGB)</button>
+                        <button id="btnPro" class="toggle-btn" onclick="setMode('pro')">🧠 PRO (GRU)</button>
+                    </div>
+                </div>
 
-            <button class="btn-action btn-train" onclick="trainModel()">Start Training</button>
-            <div id="trainLoader" class="loader"></div>
-            <p id="trainStatus" style="text-align:center; color:#94a3b8; font-size:0.9rem; margin-top:5px;"></p>
+                <button class="btn-gen" style="width: 100%;" onclick="trainModel()">Start Training</button>
+                <div id="trainLoader" class="loader"></div>
+                <p id="trainStatus" style="text-align:center; color:var(--text-secondary); font-size:1rem; margin-top:15px; font-weight: bold;"></p>
+            </div>
         </div>
 
         <div id="highlightsBox" class="highlights-grid">
-            <div class="highlight-card"><div style="font-size:0.8rem">100% Lasts</div><div id="hl-100" class="highlight-val">--</div></div>
-            <div class="highlight-card"><div style="font-size:0.8rem">50% Lasts</div><div id="hl-50" class="highlight-val">--</div></div>
-            <div class="highlight-card"><div style="font-size:0.8rem">25% Lasts</div><div id="hl-25" class="highlight-val">--</div></div>
-            <div class="highlight-card"><div style="font-size:0.8rem">5% Lasts</div><div id="hl-5" class="highlight-val">--</div></div>
+            <div class="highlight-card"><div style="font-size:0.8rem; color: var(--text-secondary);">100% Lasts</div><div id="hl-100" class="highlight-val">--</div></div>
+            <div class="highlight-card"><div style="font-size:0.8rem; color: var(--text-secondary);">50% Lasts</div><div id="hl-50" class="highlight-val">--</div></div>
+            <div class="highlight-card"><div style="font-size:0.8rem; color: var(--text-secondary);">25% Lasts</div><div id="hl-25" class="highlight-val">--</div></div>
+            <div class="highlight-card"><div style="font-size:0.8rem; color: var(--text-secondary);">5% Lasts</div><div id="hl-5" class="highlight-val">--</div></div>
         </div>
 
-        <div id="chartContainer" class="chart-wrapper">
-            <canvas id="socGraph"></canvas>
+        <div class="card" id="chartContainer" style="display:none; margin-top: 30px;">
+             <h3 style="text-align: left; margin-bottom: 15px; color: var(--text-secondary);">Training Results</h3>
+            <div style="height: 300px;"><canvas id="socGraph"></canvas></div>
         </div>
 
-        <div id="predictZone" style="display:none; margin-top:30px; border-top: 1px solid rgba(255,255,255,0.1); padding-top:20px;">
-            <h3 style="text-align:center;">🔮 Live Prediction</h3>
+        <div id="predictZone" class="card" style="display:none; margin-top:30px;">
+            <h2 style="text-align:center; color: var(--accent-blue); margin-bottom: 25px;">🔮 Live Prediction</h2>
             
-            <div class="controls-grid">
-                <div class="input-group">
-                    <label>Voltage (V)</label>
-                    <input type="number" id="predVolts" step="0.01" placeholder="e.g 11.2">
-                </div>
-                <div class="input-group">
-                    <label>Current (A)</label>
-                    <input type="number" id="predAmps" value="0.5" step="0.1">
-                </div>
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                
+                 <div class="control-card">
+                     <h3 style="margin-bottom: 15px; font-size: 1.1rem; color: var(--accent-blue);">Manual Analysis</h3>
+                    <div class="input-row" style="margin-top: 0; gap: 15px;">
+                        <div style="flex:1;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">Voltage (V)</label>
+                            <input type="number" id="predVolts" step="0.01" placeholder="11.2">
+                        </div>
+                         <div style="flex:1;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">Current (A)</label>
+                            <input type="number" id="predAmps" value="0.5" step="0.1">
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">Temp (°C)</label>
+                            <input type="number" id="predTemp" value="25.0" step="0.1">
+                        </div>
+                    </div>
+                    <button class="btn-download" onclick="predict('manual')" style="margin-top: 20px;">Predict from Sensors</button>
+                 </div>
+
+                 <div class="or-divider" style="margin: 10px 0;">OR</div>
+
+                 <div class="control-card">
+                     <h3 style="margin-bottom: 15px; font-size: 1.1rem; color: var(--accent-green);">Direct SoC Entry</h3>
+                     <div style="margin-bottom: 10px;">
+                        <label style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">Current SoC (%)</label>
+                        <input type="number" id="predSoc" step="1" placeholder="Enter % directly" style="width: 100%;">
+                     </div>
+                      <button class="btn-download" style="background: var(--accent-green); margin-top: 15px;" onclick="predict('direct')">Calculate Duration</button>
+                 </div>
+                 
             </div>
 
-            <div class="or-divider">OR</div>
-
-            <div class="input-group" style="max-width: 50%; margin: 0 auto;">
-                <label>Current SoC (%)</label>
-                <input type="number" id="predSoc" step="1" placeholder="Enter % directly">
-            </div>
-
-            <button class="btn-action btn-predict" style="display:block;" onclick="predict()">Calculate Remaining Time</button>
-            
-            <div id="predResult" style="text-align:center; margin-top:20px; display:none;">
-                <div id="resTime" style="font-size:2rem; font-weight:bold; color:#3b82f6;"></div>
-                <div id="resSoc" style="color:#94a3b8;"></div>
+            <div id="predResult" style="text-align:center; margin-top:30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); display:none;">
+                <div id="resTime" style="font-size:3.5rem; font-weight:800; color:var(--accent-blue);"></div>
+                <div id="resSoc" style="color:var(--text-secondary); font-size: 1.1rem; margin-top: 10px;"></div>
             </div>
         </div>
-
     </div>
     <script src="analysis.js"></script>
 </body>

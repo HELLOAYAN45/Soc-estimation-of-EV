@@ -25,8 +25,8 @@
         <div class="stats-grid">
             <div class="card">
                 <div class="card-label">State of Charge (SOC)</div>
-                <div class="value-large soc-value"><span id="socDisplay">0.0</span>%</div>
-                <div class="battery-bar-container"><div class="battery-fill" id="socBar"></div></div>
+                <div class="value-large soc-value"><span id="socDisplay">100.0</span>%</div>
+                <div class="battery-bar-container"><div class="battery-fill" id="socBar" style="width: 100%;"></div></div>
             </div>
             <div class="card">
                 <div class="card-label">Voltage</div>
@@ -36,6 +36,10 @@
                 <div class="card-label">Temp</div>
                 <div class="value-large"><span id="tempDisplay">0.0</span>°C</div>
             </div>
+            <div class="card">
+                <div class="card-label">Time Remaining</div>
+                <div class="value-large duration-value"><span id="durationDisplay">--</span><span class="unit"> Min</span></div>
+            </div>
         </div>
 
         <div class="card" style="margin-bottom: 30px; text-align: left;">
@@ -44,14 +48,31 @@
         </div>
 
         <div class="control-panel">
+            <div class="control-card" style="border-color: var(--accent-green);">
+                <h3 style="color: var(--accent-green);">Live AI Prediction Engine</h3>
+                <input type="file" id="liveCsvFile" accept=".csv" class="nav-btn" style="width: 100%; margin-bottom: 15px;">
+                
+                <div id="liveMapperSection" style="display:none;">
+                    <div class="mapper-grid" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));">
+                        <div class="map-item"><label>Time</label><select id="liveMapTime"></select></div>
+                        <div class="map-item"><label>Voltage</label><select id="liveMapVolts"></select></div>
+                        <div class="map-item"><label>Current</label><select id="liveMapAmps"></select></div>
+                        <div class="map-item"><label>Temp</label><select id="liveMapTemp"></select></div>
+                        <div class="map-item"><label>SoC %</label><select id="liveMapSoc"></select></div>
+                    </div>
+                    <select id="liveMType" style="margin-top:15px; width:100%">
+                        <option value="fast">⚡ Fast Model (XGBoost)</option>
+                        <option value="pro">🧠 Pro Model (CNN-GRU)</option>
+                    </select>
+                    <button class="btn-gen" style="width:100%; margin-top:15px;" onclick="trainLiveAI()">Train & Connect Live AI</button>
+                </div>
+                <p id="liveStatusMsg" style="margin-top:10px; font-weight:bold;"></p>
+            </div>
+
             <div class="control-card">
                 <h3>Generate EV Dataset</h3>
-                <div class="input-row"><input type="number" id="minV" placeholder="Stop (9.0)"><button class="btn-gen" id="genBtn" onclick="toggleGeneration()">Start Recording</button></div>
+                <div class="input-row"><input type="number" id="minV" placeholder="Stop (9.0)"><button class="btn-gen" id="genBtn" onclick="toggleGeneration()" style="background: var(--accent-blue);">Start Recording</button></div>
                 <button class="btn-download" id="dlBtn" style="display:none;" onclick="location.href='/download_csv'">Download CSV</button>
-            </div>
-            <div class="control-card">
-                <h3>Go to AI Testing</h3>
-                <button class="btn-download" onclick="location.href='/analysis'" style="margin-top: 25px; padding: 18px;">Open Analysis Lab 🧠</button>
             </div>
         </div>
     </div>

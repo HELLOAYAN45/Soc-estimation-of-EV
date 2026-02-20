@@ -20,28 +20,20 @@ is_recording = False
 recording_session = []
 v_threshold = 9.0
 
-# --- NAVIGATION ROUTES ---
 @app.route('/')
-def index(): 
-    return send_from_directory('.', 'index.html')
+def index(): return send_from_directory('.', 'index.html')
 
 @app.route('/analysis')
-def analysis_page(): 
-    return send_from_directory('.', 'analysis.html')
+def analysis_page(): return send_from_directory('.', 'analysis.html')
 
-# --- THIS IS THE FIX: Serves your CSS, JS, and MP4 files ---
 @app.route('/<path:path>')
-def send_static(path):
-    return send_from_directory('.', path)
+def send_static(path): return send_from_directory('.', path)
 
-# --- HARDWARE BRIDGE ---
 @app.route('/live_data', methods=['POST'])
 def receive_data():
     global latest_sensor_data, is_recording, recording_session
     data = request.get_json()
     v, i, t = round(data.get('voltage', 0.0), 2), round(data.get('current', 0.0), 2), round(data.get('temp', 0.0), 1)
-    
-    # 3S Li-ion Logic: 9.0V to 12.6V
     soc_calc = round(max(0, min(100, ((v - 9.0) / (12.6 - 9.0)) * 100)), 1)
     latest_sensor_data.update({"voltage": v, "current": i, "temp": t, "soc": soc_calc})
 
@@ -54,23 +46,19 @@ def receive_data():
 @app.route('/get_data')
 def get_data(): return jsonify(latest_sensor_data)
 
-# --- LIVE PROJECTED CURVE ---
 @app.route('/live_curve_data')
 def live_curve_data():
     v, i, soc = latest_sensor_data['voltage'], latest_sensor_data['current'], latest_sensor_data['soc']
     draw = i if i > 0.1 else 0.5 
     remaining_ah = 2.0 * (soc / 100.0)
     mins_left = int((remaining_ah / draw) * 60) if draw > 0 else 0
-    
     times, socs = [], []
     for step in range(11):
         fraction = step / 10.0
         times.append(int(mins_left * fraction))
         socs.append(round(soc - (soc * fraction), 1))
-        
     return jsonify({"times": times, "socs": socs, "mins_left": mins_left})
 
-# --- CSV GENERATION ---
 @app.route('/toggle_gen', methods=['POST'])
 def toggle_gen():
     global is_recording, recording_session, v_threshold
@@ -86,15 +74,18 @@ def download_csv():
     df.to_csv('ev_session.csv', index=False)
     return send_file('ev_session.csv', as_attachment=True)
 
-# --- AI TRAINING & PREDICTION ---
+# --- AI TRAINING & PREDICTION ROUTES ---
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    if 'file' not in request.files: return jsonify({"error": "No file"}), 400
     file = request.files['file']
-    user_id = str(uuid.uuid4())
-    path = os.path.join('uploads', f"{user_id}.csv")
-    file.save(path)
-    df = pd.read_csv(path)
-    return jsonify({"user_id": user_id, "headers": df.columns.tolist()})
+    try:
+        user_id = str(uuid.uuid4())
+        file_path = os.path.join('uploads', f"{user_id}.csv")
+        file.save(file_path)
+        df = pd.read_csv(file_path)
+        return jsonify({"status": "success", "user_id": user_id, "headers": df.columns.tolist()})
+    except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/train', methods=['POST'])
 def train():
@@ -103,31 +94,49 @@ def train():
         uid, mapping, m_type = data['user_id'], data['mapping'], data['model_type']
         df = pd.read_csv(os.path.join('uploads', f"{uid}.csv"))
         
-        X = df[[mapping['voltage'], mapping['current'], mapping['temp']]].values
-        y = df[mapping['soc']].values
-        time_data = df[mapping['time']].values
+        train_df = pd.DataFrame()
+        train_df['V'] = pd.to_numeric(df[mapping['voltage']], errors='coerce')
+        train_df['I'] = pd.to_numeric(df[mapping['current']], errors='coerce')
+        train_df['T'] = pd.to_numeric(df[mapping['temp']], errors='coerce')
+        train_df['SoC'] = pd.to_numeric(df[mapping['soc']], errors='coerce')
+
+        raw_time = df[mapping['time']]
+        if pd.api.types.is_numeric_dtype(raw_time):
+            train_df['Time'] = raw_time - raw_time.min()
+        else:
+            time_series = pd.to_datetime(raw_time, errors='coerce')
+            train_df['Time'] = (time_series - time_series.min()).dt.total_seconds()
+
+        train_df = train_df.dropna()
+        train_df = train_df[train_df['V'] > 0]
         
-        duration_df = pd.DataFrame({"soc": y, "actual_time": time_data})
-        joblib.dump(duration_df, f"models/{uid}_duration.pkl")
+        max_time = train_df['Time'].max()
+        train_df['Remaining_Time'] = max_time - train_df['Time']
+        
+        duration_map = train_df[['SoC', 'Remaining_Time']].sort_values('SoC').reset_index(drop=True)
+        joblib.dump(duration_map, f"models/{uid}_duration.pkl")
+
+        X, y = train_df[['V', 'I', 'T']].values, train_df['SoC'].values
 
         if m_type == 'fast':
-            model = xgb.XGBRegressor(n_estimators=100)
-            model.fit(X, y)
-            model.save_model(f"models/{uid}_fast.json")
+            model = xgb.XGBRegressor(n_estimators=100); model.fit(X, y); model.save_model(f"models/{uid}_fast.json")
         else:
             scaler_X, scaler_y = MinMaxScaler(), MinMaxScaler()
             X_s, y_s = scaler_X.fit_transform(X), scaler_y.fit_transform(y.reshape(-1, 1))
-            joblib.dump(scaler_X, f"models/{uid}_scalerX.pkl")
-            joblib.dump(scaler_y, f"models/{uid}_scalerY.pkl")
-            model = Sequential([GRU(32, input_shape=(1, 3)), Dense(1)])
-            model.compile(optimizer='adam', loss='mse')
-            model.fit(X_s.reshape(-1, 1, 3), y_s, epochs=10, verbose=0)
-            model.save(f"models/{uid}_pro.h5")
+            joblib.dump(scaler_X, f"models/{uid}_scalerX.pkl"); joblib.dump(scaler_y, f"models/{uid}_scalerY.pkl")
+            model = Sequential([GRU(32, input_shape=(1, 3)), Dense(1)]); model.compile(optimizer='adam', loss='mse')
+            model.fit(X_s.reshape(-1, 1, 3), y_s, epochs=10, verbose=0); model.save(f"models/{uid}_pro.keras")
+
+        highlights = {}
+        for target in [100, 50, 25, 5]:
+            closest_idx = (duration_map['SoC'] - target).abs().idxmin()
+            highlights[f"{target}%"] = f"{round(duration_map.iloc[closest_idx]['Remaining_Time']/60, 1)} min"
 
         step = max(1, len(y) // 50)
         return jsonify({
-            "status": "success",
-            "graph_data": {"time": list(range(len(y[::step]))), "soc": y[::step].tolist()}
+            "status": "success", "highlights": highlights,
+            "max_voltage": float(train_df['V'].max()),
+            "graph_data": {"time": train_df['Time'].iloc[::step].tolist(), "soc": train_df['SoC'].iloc[::step].tolist()}
         })
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -136,23 +145,26 @@ def predict():
     try:
         data = request.json
         uid, m_type = data['user_id'], data.get('model_type', 'fast')
+        
         if data.get('soc'):
             pred_soc = float(data['soc'])
+            engine_used = "Direct Input"
         else:
             v, i, t = float(data['voltage']), float(data['current']), float(data['temp'])
             if m_type == 'fast':
-                model = xgb.XGBRegressor(); model.load_model(f"models/{uid}_fast.json")
-                pred_soc = model.predict(np.array([[v, i, t]]))[0]
+                model = xgb.XGBRegressor(); model.load_model(f"models/{uid}_fast.json"); pred_soc = model.predict(np.array([[v, i, t]]))[0]
             else:
-                model = tf.keras.models.load_model(f"models/{uid}_pro.h5")
+                model = tf.keras.models.load_model(f"models/{uid}_pro.keras", compile=False)
                 sX, sY = joblib.load(f"models/{uid}_scalerX.pkl"), joblib.load(f"models/{uid}_scalerY.pkl")
-                X_val = sX.transform(np.array([[v, i, t]]))
-                pred_soc = sY.inverse_transform(model.predict(X_val.reshape(1,1,3)))[0][0]
+                X_val = sX.transform(np.array([[v, i, t]])); pred_soc = sY.inverse_transform(model.predict(X_val.reshape(1,1,3)))[0][0]
+            engine_used = f"{m_type.upper()} AI Model"
 
         duration_map = joblib.load(f"models/{uid}_duration.pkl")
-        closest_idx = (duration_map['soc'] - pred_soc).abs().idxmin()
-        time_rem = len(duration_map) - closest_idx
-        return jsonify({"soc": round(float(pred_soc), 1), "time_remaining_min": round(time_rem/60, 1)})
+        pred_soc = max(0, min(100, pred_soc))
+        closest_idx = (duration_map['SoC'] - pred_soc).abs().idxmin()
+        time_rem = float(duration_map.iloc[closest_idx]['Remaining_Time'])
+        
+        return jsonify({"soc": round(float(pred_soc), 1), "time_remaining_min": round(time_rem/60, 1), "engine": engine_used})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':

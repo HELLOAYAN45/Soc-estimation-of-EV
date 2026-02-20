@@ -92,22 +92,29 @@ async function trainModel() {
         if (data.status === 'success') {
             document.getElementById('trainStatus').innerText = "✅ Training Complete!";
             
-            document.getElementById('highlightsBox').style.display = 'grid';
-            document.getElementById('hl-100').innerText = data.highlights['100%'];
-            document.getElementById('hl-50').innerText = data.highlights['50%'];
-            document.getElementById('hl-25').innerText = data.highlights['25%'];
-            document.getElementById('hl-5').innerText = data.highlights['5%'];
+            if (data.highlights) {
+                document.getElementById('highlightsBox').style.display = 'grid';
+                document.getElementById('hl-100').innerText = data.highlights['100%'] || "--";
+                document.getElementById('hl-50').innerText = data.highlights['50%'] || "--";
+                document.getElementById('hl-25').innerText = data.highlights['25%'] || "--";
+                document.getElementById('hl-5').innerText = data.highlights['5%'] || "--";
+            }
 
-            renderChart(data.graph_data.time, data.graph_data.soc);
+            if (data.graph_data && data.graph_data.time && data.graph_data.soc) {
+                renderChart(data.graph_data.time, data.graph_data.soc);
+            }
 
             document.getElementById('predictZone').style.display = 'block';
-            document.getElementById('predVolts').value = data.max_voltage;
+            
+            if (data.max_voltage) {
+                document.getElementById('predVolts').value = data.max_voltage;
+            }
         } else {
             document.getElementById('trainStatus').innerText = "❌ Error: " + (data.error || "Unknown Error");
         }
-
     } catch (err) {
-        document.getElementById('trainStatus').innerText = "❌ Connection Error";
+        console.error("Javascript Error:", err);
+        document.getElementById('trainStatus').innerText = "❌ UI Error: " + err.message;
         document.getElementById('trainLoader').style.display = 'none';
     }
 }
@@ -121,7 +128,7 @@ function renderChart(times, socs) {
     chartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: times.map(t => (t/60).toFixed(0)), 
+            labels: times.map(t => (t/60).toFixed(1)), 
             datasets: [{
                 label: 'SoC %',
                 data: socs,
@@ -145,19 +152,25 @@ function renderChart(times, socs) {
     });
 }
 
-// 3. PREDICT (FIXED ERROR HANDLING)
-async function predict() {
-    const v = document.getElementById('predVolts').value;
-    const i = document.getElementById('predAmps').value;
-    const s = document.getElementById('predSoc').value;
-
+// 3. PREDICT
+async function predict(mode) {
     const payload = {
         user_id: currentUserId,
-        model_type: currentMode,
-        voltage: v,
-        current: i,
-        soc: s 
+        model_type: currentMode
     };
+    
+    if (mode === 'manual') {
+        payload.voltage = document.getElementById('predVolts').value;
+        payload.current = document.getElementById('predAmps').value;
+        payload.temp = document.getElementById('predTemp').value || 25.0;
+        document.getElementById('predSoc').value = ''; 
+    } else {
+        payload.soc = document.getElementById('predSoc').value;
+        if (!payload.soc) {
+            alert("Please enter an SoC %");
+            return;
+        }
+    }
     
     try {
         const res = await fetch(`${API_URL}/predict`, {
@@ -167,8 +180,6 @@ async function predict() {
         });
         const data = await res.json();
 
-        // --- HERE IS THE FIX ---
-        // Check if backend sent an error
         if (data.error) {
             alert("Prediction Error: " + data.error);
             return;
