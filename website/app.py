@@ -19,6 +19,7 @@ latest_sensor_data = {"voltage": 0.0, "current": 0.0, "temp": 0.0, "soc": 0.0}
 is_recording = False
 recording_session = []
 v_threshold = 9.0
+recording_start_time = None  # <-- Added stopwatch tracker
 
 @app.route('/')
 def index(): return send_from_directory('.', 'index.html')
@@ -31,7 +32,7 @@ def send_static(path): return send_from_directory('.', path)
 
 @app.route('/live_data', methods=['POST'])
 def receive_data():
-    global latest_sensor_data, is_recording, recording_session
+    global latest_sensor_data, is_recording, recording_session, recording_start_time
     data = request.get_json()
     v, i, t = round(data.get('voltage', 0.0), 2), round(data.get('current', 0.0), 2), round(data.get('temp', 0.0), 1)
     soc_calc = round(max(0, min(100, ((v - 9.0) / (12.6 - 9.0)) * 100)), 1)
@@ -39,7 +40,13 @@ def receive_data():
 
     if is_recording:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        recording_session.append({"time": timestamp, "voltage": v, "current": i, "temp": t, "soc": soc_calc})
+        
+        # <-- Calculate elapsed stopwatch seconds and format as "Xsec"
+        elapsed_seconds = int((datetime.datetime.now() - recording_start_time).total_seconds())
+        time_count_str = f"{elapsed_seconds}sec"
+        
+        # <-- Added 'time_count' to the appended data
+        recording_session.append({"time": timestamp, "time_count": time_count_str, "voltage": v, "current": i, "temp": t, "soc": soc_calc})
         if v <= v_threshold: is_recording = False
     return jsonify({"status": "success", "recording": is_recording}), 200
 
@@ -61,11 +68,13 @@ def live_curve_data():
 
 @app.route('/toggle_gen', methods=['POST'])
 def toggle_gen():
-    global is_recording, recording_session, v_threshold
+    global is_recording, recording_session, v_threshold, recording_start_time
     req = request.json
     v_threshold = float(req.get('min_v', 9.0))
     is_recording = not is_recording
-    if is_recording: recording_session = []
+    if is_recording: 
+        recording_session = []
+        recording_start_time = datetime.datetime.now()  # <-- Start the stopwatch at 0
     return jsonify({"is_recording": is_recording})
 
 @app.route('/download_csv')
