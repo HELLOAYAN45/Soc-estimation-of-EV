@@ -19,7 +19,7 @@ latest_sensor_data = {"voltage": 0.0, "current": 0.0, "temp": 0.0, "soc": 0.0}
 is_recording = False
 recording_session = []
 v_threshold = 9.0
-recording_start_time = None  # <-- Added stopwatch tracker
+recording_start_time = None  
 
 @app.route('/')
 def index(): return send_from_directory('.', 'index.html')
@@ -40,14 +40,11 @@ def receive_data():
 
     if is_recording:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        
-        # <-- Calculate elapsed stopwatch seconds and format as "Xsec"
         elapsed_seconds = int((datetime.datetime.now() - recording_start_time).total_seconds())
         time_count_str = f"{elapsed_seconds}sec"
         
-        # <-- Added 'time_count' to the appended data
         recording_session.append({"time": timestamp, "time_count": time_count_str, "voltage": v, "current": i, "temp": t, "soc": soc_calc})
-        if v <= v_threshold: is_recording = False
+        
     return jsonify({"status": "success", "recording": is_recording}), 200
 
 @app.route('/get_data')
@@ -71,10 +68,13 @@ def toggle_gen():
     global is_recording, recording_session, v_threshold, recording_start_time
     req = request.json
     v_threshold = float(req.get('min_v', 9.0))
+    
     is_recording = not is_recording
+    
     if is_recording: 
         recording_session = []
-        recording_start_time = datetime.datetime.now()  # <-- Start the stopwatch at 0
+        recording_start_time = datetime.datetime.now() 
+        
     return jsonify({"is_recording": is_recording})
 
 @app.route('/download_csv')
@@ -110,8 +110,12 @@ def train():
         train_df['SoC'] = pd.to_numeric(df[mapping['soc']], errors='coerce')
 
         raw_time = df[mapping['time']]
+        
         if pd.api.types.is_numeric_dtype(raw_time):
             train_df['Time'] = raw_time - raw_time.min()
+        elif raw_time.astype(str).str.contains('sec').any():
+            clean_time = pd.to_numeric(raw_time.astype(str).str.replace('sec', '').str.strip(), errors='coerce')
+            train_df['Time'] = clean_time - clean_time.min()
         else:
             time_series = pd.to_datetime(raw_time, errors='coerce')
             train_df['Time'] = (time_series - time_series.min()).dt.total_seconds()
@@ -122,7 +126,9 @@ def train():
         max_time = train_df['Time'].max()
         train_df['Remaining_Time'] = max_time - train_df['Time']
         
+        # --- FIXED CUMULATIVE MAXIMUM LOGIC ---
         duration_map = train_df[['SoC', 'Remaining_Time']].sort_values('SoC').reset_index(drop=True)
+        duration_map['Remaining_Time'] = duration_map['Remaining_Time'].cummax() # Forces logical monotonicity
         joblib.dump(duration_map, f"models/{uid}_duration.pkl")
 
         X, y = train_df[['V', 'I', 'T']].values, train_df['SoC'].values
@@ -137,7 +143,7 @@ def train():
             model.fit(X_s.reshape(-1, 1, 3), y_s, epochs=10, verbose=0); model.save(f"models/{uid}_pro.keras")
 
         highlights = {}
-        for target in [100, 50, 25, 5]:
+        for target in [100, 85, 50, 25]:
             closest_idx = (duration_map['SoC'] - target).abs().idxmin()
             highlights[f"{target}%"] = f"{round(duration_map.iloc[closest_idx]['Remaining_Time']/60, 1)} min"
 
