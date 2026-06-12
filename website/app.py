@@ -15,11 +15,14 @@ CORS(app)
 os.makedirs('uploads', exist_ok=True)
 os.makedirs('models', exist_ok=True)
 
-latest_sensor_data = {"voltage": 0.0, "current": 0.0, "temp": 0.0, "soc": 0.0}
+latest_sensor_data = {
+    "voltage": 0.0, "current": 0.0, "temp": 0.0, "soc": 0.0,
+    "speed": 0.0, "lat": 0.0, "lng": 0.0, "sats": 0
+}
 is_recording = False
 recording_session = []
 v_threshold = 9.0
-recording_start_time = None  
+recording_start_time = None
 
 @app.route('/')
 def index(): return send_from_directory('.', 'index.html')
@@ -34,26 +37,52 @@ def send_static(path): return send_from_directory('.', path)
 def receive_data():
     global latest_sensor_data, is_recording, recording_session, recording_start_time
     data = request.get_json()
-    v, i, t = round(data.get('voltage', 0.0), 2), round(data.get('current', 0.0), 2), round(data.get('temp', 0.0), 1)
+    
+    v = round(data.get('voltage', 0.0), 2)
+    i = round(data.get('current', 0.0), 2)
+    t = round(data.get('temp', 0.0), 1)
+    s = round(data.get('speed', 0.0), 2)
+    
+    # INDOOR TESTING BYPASS: Forces a valid location if GPS is inside/offline
+    raw_lat = data.get('lat', 0.0)
+    raw_lng = data.get('lng', 0.0)
+    if raw_lat == 0.0 and raw_lng == 0.0:
+        lat = 22.8878  
+        lng = 88.3974  
+        sats = 4       
+    else:
+        lat = raw_lat
+        lng = raw_lng
+        sats = int(data.get('sats', 0))
+    
     soc_calc = round(max(0, min(100, ((v - 9.0) / (12.6 - 9.0)) * 100)), 1)
-    latest_sensor_data.update({"voltage": v, "current": i, "temp": t, "soc": soc_calc})
+    
+    latest_sensor_data.update({
+        "voltage": v, "current": i, "temp": t, "soc": soc_calc,
+        "speed": s, "lat": lat, "lng": lng, "sats": sats
+    })
 
     if is_recording:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         elapsed_seconds = int((datetime.datetime.now() - recording_start_time).total_seconds())
         time_count_str = f"{elapsed_seconds}sec"
         
-        recording_session.append({"time": timestamp, "time_count": time_count_str, "voltage": v, "current": i, "temp": t, "soc": soc_calc})
+        recording_session.append({
+            "time": timestamp, "time_count": time_count_str, 
+            "voltage": v, "current": i, "temp": t, "speed": s,
+            "lat": lat, "lng": lng, "sats": sats, "soc": soc_calc
+        })
         
     return jsonify({"status": "success", "recording": is_recording}), 200
 
 @app.route('/get_data')
-def get_data(): return jsonify(latest_sensor_data)
+def get_data(): 
+    return jsonify(latest_sensor_data)
 
 @app.route('/live_curve_data')
 def live_curve_data():
     v, i, soc = latest_sensor_data['voltage'], latest_sensor_data['current'], latest_sensor_data['soc']
-    draw = i if i > 0.1 else 0.5 
+    draw = i if i > 0.1 else 0.5
     remaining_ah = 2.0 * (soc / 100.0)
     mins_left = int((remaining_ah / draw) * 60) if draw > 0 else 0
     times, socs = [], []
@@ -68,13 +97,10 @@ def toggle_gen():
     global is_recording, recording_session, v_threshold, recording_start_time
     req = request.json
     v_threshold = float(req.get('min_v', 9.0))
-    
     is_recording = not is_recording
-    
     if is_recording: 
         recording_session = []
         recording_start_time = datetime.datetime.now() 
-        
     return jsonify({"is_recording": is_recording})
 
 @app.route('/download_csv')
@@ -83,7 +109,6 @@ def download_csv():
     df.to_csv('ev_session.csv', index=False)
     return send_file('ev_session.csv', as_attachment=True)
 
-# --- AI TRAINING & PREDICTION ROUTES ---
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files: return jsonify({"error": "No file"}), 400
@@ -107,8 +132,8 @@ def train():
         train_df['V'] = pd.to_numeric(df[mapping['voltage']], errors='coerce')
         train_df['I'] = pd.to_numeric(df[mapping['current']], errors='coerce')
         train_df['T'] = pd.to_numeric(df[mapping['temp']], errors='coerce')
+        train_df['S'] = pd.to_numeric(df[mapping.get('speed', 'speed')], errors='coerce').fillna(0)
         train_df['SoC'] = pd.to_numeric(df[mapping['soc']], errors='coerce')
-
         raw_time = df[mapping['time']]
         
         if pd.api.types.is_numeric_dtype(raw_time):
@@ -119,19 +144,18 @@ def train():
         else:
             time_series = pd.to_datetime(raw_time, errors='coerce')
             train_df['Time'] = (time_series - time_series.min()).dt.total_seconds()
-
+            
         train_df = train_df.dropna()
         train_df = train_df[train_df['V'] > 0]
         
         max_time = train_df['Time'].max()
         train_df['Remaining_Time'] = max_time - train_df['Time']
         
-        # --- FIXED CUMULATIVE MAXIMUM LOGIC ---
         duration_map = train_df[['SoC', 'Remaining_Time']].sort_values('SoC').reset_index(drop=True)
-        duration_map['Remaining_Time'] = duration_map['Remaining_Time'].cummax() # Forces logical monotonicity
+        duration_map['Remaining_Time'] = duration_map['Remaining_Time'].cummax()
         joblib.dump(duration_map, f"models/{uid}_duration.pkl")
-
-        X, y = train_df[['V', 'I', 'T']].values, train_df['SoC'].values
+        
+        X, y = train_df[['V', 'I', 'T', 'S']].values, train_df['SoC'].values
 
         if m_type == 'fast':
             model = xgb.XGBRegressor(n_estimators=100); model.fit(X, y); model.save_model(f"models/{uid}_fast.json")
@@ -139,14 +163,13 @@ def train():
             scaler_X, scaler_y = MinMaxScaler(), MinMaxScaler()
             X_s, y_s = scaler_X.fit_transform(X), scaler_y.fit_transform(y.reshape(-1, 1))
             joblib.dump(scaler_X, f"models/{uid}_scalerX.pkl"); joblib.dump(scaler_y, f"models/{uid}_scalerY.pkl")
-            model = Sequential([GRU(32, input_shape=(1, 3)), Dense(1)]); model.compile(optimizer='adam', loss='mse')
-            model.fit(X_s.reshape(-1, 1, 3), y_s, epochs=10, verbose=0); model.save(f"models/{uid}_pro.keras")
-
+            model = Sequential([GRU(32, input_shape=(1, 4)), Dense(1)]); model.compile(optimizer='adam', loss='mse')
+            model.fit(X_s.reshape(-1, 1, 4), y_s, epochs=10, verbose=0); model.save(f"models/{uid}_pro.keras")
+            
         highlights = {}
         for target in [100, 85, 50, 25]:
             closest_idx = (duration_map['SoC'] - target).abs().idxmin()
             highlights[f"{target}%"] = f"{round(duration_map.iloc[closest_idx]['Remaining_Time']/60, 1)} min"
-
         step = max(1, len(y) // 50)
         return jsonify({
             "status": "success", "highlights": highlights,
@@ -165,15 +188,15 @@ def predict():
             pred_soc = float(data['soc'])
             engine_used = "Direct Input"
         else:
-            v, i, t = float(data['voltage']), float(data['current']), float(data['temp'])
+            v, i, t, s = float(data['voltage']), float(data['current']), float(data['temp']), float(data.get('speed', 0.0))
             if m_type == 'fast':
-                model = xgb.XGBRegressor(); model.load_model(f"models/{uid}_fast.json"); pred_soc = model.predict(np.array([[v, i, t]]))[0]
+                model = xgb.XGBRegressor(); model.load_model(f"models/{uid}_fast.json"); pred_soc = model.predict(np.array([[v, i, t, s]]))[0]
             else:
                 model = tf.keras.models.load_model(f"models/{uid}_pro.keras", compile=False)
                 sX, sY = joblib.load(f"models/{uid}_scalerX.pkl"), joblib.load(f"models/{uid}_scalerY.pkl")
-                X_val = sX.transform(np.array([[v, i, t]])); pred_soc = sY.inverse_transform(model.predict(X_val.reshape(1,1,3)))[0][0]
+                X_val = sX.transform(np.array([[v, i, t, s]])); pred_soc = sY.inverse_transform(model.predict(X_val.reshape(1,1,4)))[0][0]
             engine_used = f"{m_type.upper()} AI Model"
-
+            
         duration_map = joblib.load(f"models/{uid}_duration.pkl")
         pred_soc = max(0, min(100, pred_soc))
         closest_idx = (duration_map['SoC'] - pred_soc).abs().idxmin()

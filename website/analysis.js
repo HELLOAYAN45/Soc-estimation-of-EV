@@ -9,7 +9,6 @@ function setMode(mode) {
     document.getElementById('btnPro').classList.toggle('active', mode === 'pro');
 }
 
-// 1. UPLOAD
 document.getElementById('csvInput').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -40,7 +39,7 @@ document.getElementById('csvInput').addEventListener('change', async (e) => {
 });
 
 function populateMappers(headers) {
-    const selects = ['mapTime', 'mapVolts', 'mapAmps', 'mapTemp', 'mapSoc'];
+    const selects = ['mapTime', 'mapVolts', 'mapAmps', 'mapTemp', 'mapSpeed', 'mapSoc'];
     selects.forEach(id => {
         const sel = document.getElementById(id);
         sel.innerHTML = "";
@@ -57,18 +56,19 @@ function populateMappers(headers) {
             if (lowerId.includes('volt')) if (h.includes('volt') || h.includes('v')) sel.selectedIndex = i;
             if (lowerId.includes('amp')) if (h.includes('amp') || h.includes('curr')) sel.selectedIndex = i;
             if (lowerId.includes('temp')) if (h.includes('temp') || h.includes('deg')) sel.selectedIndex = i;
+            if (lowerId.includes('speed')) if (h.includes('speed') || h.includes('vel')) sel.selectedIndex = i;
             if (lowerId.includes('soc')) if (h.includes('soc') || h.includes('perc')) sel.selectedIndex = i;
         }
     });
 }
 
-// 2. TRAIN
 async function trainModel() {
     const mapping = {
         time: document.getElementById('mapTime').value,
         voltage: document.getElementById('mapVolts').value,
         current: document.getElementById('mapAmps').value,
         temp: document.getElementById('mapTemp').value,
+        speed: document.getElementById('mapSpeed').value,
         soc: document.getElementById('mapSoc').value
     };
 
@@ -105,7 +105,6 @@ async function trainModel() {
             }
 
             document.getElementById('predictZone').style.display = 'block';
-            
             if (data.max_voltage) {
                 document.getElementById('predVolts').value = data.max_voltage;
             }
@@ -122,9 +121,7 @@ async function trainModel() {
 function renderChart(times, socs) {
     const ctx = document.getElementById('socGraph').getContext('2d');
     document.getElementById('chartContainer').style.display = 'block';
-
     if (chartInstance) chartInstance.destroy();
-
     chartInstance = new Chart(ctx, {
         type: 'line',
         data: {
@@ -152,7 +149,6 @@ function renderChart(times, socs) {
     });
 }
 
-// 3. PREDICT
 async function predict(mode) {
     const payload = {
         user_id: currentUserId,
@@ -163,6 +159,7 @@ async function predict(mode) {
         payload.voltage = document.getElementById('predVolts').value;
         payload.current = document.getElementById('predAmps').value;
         payload.temp = document.getElementById('predTemp').value || 25.0;
+        payload.speed = document.getElementById('predSpeed').value || 0.0;
         document.getElementById('predSoc').value = ''; 
     } else {
         payload.soc = document.getElementById('predSoc').value;
@@ -179,7 +176,6 @@ async function predict(mode) {
             body: JSON.stringify(payload)
         });
         const data = await res.json();
-
         if (data.error) {
             alert("Prediction Error: " + data.error);
             return;
@@ -188,7 +184,6 @@ async function predict(mode) {
         document.getElementById('predResult').style.display = 'block';
         document.getElementById('resTime').innerText = `${data.time_remaining_min} Mins`;
         document.getElementById('resSoc').innerHTML = `At <b>${data.soc}%</b> SoC <br><span style="font-size:0.8rem; color:#64748b">(${data.engine})</span>`;
-        
     } catch (err) {
         alert("Network Error: " + err.message);
     }

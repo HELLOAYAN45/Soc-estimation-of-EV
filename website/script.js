@@ -1,13 +1,17 @@
 let liveChart = null;
 let lastDataTime = 0;
 
-// --- STRICT MONOTONIC MEMORY VARIABLES ---
 let displaySoc = 100.0;
 let displayDuration = 9999;
 let aiLiveEnabled = false;
 let liveUid = null;
 
-// Initialize Live Chart
+// Map Globals (Defaulted to Chinsurah for instant load)
+let map, carMarker, destMarker;
+let currentLat = 22.8878, currentLng = 88.3974; 
+let mapInitialized = false;
+
+// 1. Chart Initialization
 function initLiveChart() {
     const ctx = document.getElementById('liveChart').getContext('2d');
     liveChart = new Chart(ctx, {
@@ -17,7 +21,6 @@ function initLiveChart() {
     });
 }
 
-// Fetch Live Curve
 async function updateLiveCurve() {
     try {
         const res = await fetch('/live_curve_data');
@@ -28,7 +31,82 @@ async function updateLiveCurve() {
     } catch (e) {}
 }
 
-// --- NEW: LIVE AI UPLOAD & TRAIN ---
+// 2. Map Initialization & Distance Math
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3; 
+    const rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad;
+    const dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * rad) * Math.cos(lat2 * rad) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
+
+function initMap(startLat, startLng) {
+    if (mapInitialized) return;
+    
+    map = L.map('liveMap').setView([startLat, startLng], 15);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    carMarker = L.marker([startLat, startLng]).addTo(map).bindPopup("<b>RC Car Live Pos</b>").openPopup();
+
+    map.on('click', function(e) {
+        if (destMarker) map.removeLayer(destMarker);
+        destMarker = L.marker(e.latlng).addTo(map).bindPopup("Target Destination").openPopup();
+        
+        // Reset the status display waiting for manual trigger
+        document.getElementById('reachStatus').innerText = "Pending...";
+        document.getElementById('reachStatus').style.color = "var(--text-secondary)";
+    });
+
+    mapInitialized = true;
+}
+
+// BUTTON TRIGGER FUNCTION
+function triggerEstimation() {
+    if (!destMarker) {
+        alert("Please click on the map to drop a destination pin first!");
+        return;
+    }
+    updateRangeCalculator(destMarker.getLatLng().lat, destMarker.getLatLng().lng);
+}
+
+function updateRangeCalculator(targetLat, targetLng) {
+    // 1. ALWAYS calculate distance to target (even without AI)
+    const distMeters = calculateDistance(currentLat, currentLng, targetLat, targetLng);
+    document.getElementById('destDist').innerText = distMeters.toFixed(1);
+
+    // 2. Check if AI is connected (Time Remaining is not --)
+    if (displayDuration === 9999) {
+        document.getElementById('maxRange').innerText = "--";
+        document.getElementById('reachStatus').innerText = "AI Needed";
+        document.getElementById('reachStatus').style.color = "var(--accent-orange)";
+        return; // Stop here until AI is trained
+    }
+
+    // 3. If AI IS connected, calculate Max Range
+    let currentSpeedMps = parseFloat(document.getElementById('speedDisplay').innerText);
+    let assumedSpeed = currentSpeedMps > 0.5 ? currentSpeedMps : 2.0; 
+    
+    const maxRangeMeters = assumedSpeed * (displayDuration * 60);
+    document.getElementById('maxRange').innerText = maxRangeMeters.toFixed(1);
+
+    // 4. Evaluate Reachability Status
+    const statusEl = document.getElementById('reachStatus');
+    if (distMeters <= maxRangeMeters) {
+        statusEl.innerText = "✅ REACHABLE";
+        statusEl.style.color = "var(--accent-green)";
+    } else {
+        statusEl.innerText = "❌ OUT OF RANGE";
+        statusEl.style.color = "var(--accent-red)";
+    }
+}
+
+// 3. AI Upload Logic
 document.getElementById('liveCsvFile').addEventListener('change', async (e) => {
     const fd = new FormData();
     fd.append('file', e.target.files[0]);
@@ -38,7 +116,7 @@ document.getElementById('liveCsvFile').addEventListener('change', async (e) => {
     liveUid = data.user_id;
     document.getElementById('liveMapperSection').style.display = 'block';
     
-    const selects = ['liveMapTime', 'liveMapVolts', 'liveMapAmps', 'liveMapTemp', 'liveMapSoc'];
+    const selects = ['liveMapTime', 'liveMapVolts', 'liveMapAmps', 'liveMapTemp', 'liveMapSpeed', 'liveMapSoc'];
     selects.forEach(id => {
         const sel = document.getElementById(id);
         sel.innerHTML = "";
@@ -49,6 +127,7 @@ document.getElementById('liveCsvFile').addEventListener('change', async (e) => {
         if(id==='liveMapVolts') sel.selectedIndex = h.findIndex(val => val.includes('volt') || val === 'v');
         if(id==='liveMapAmps') sel.selectedIndex = h.findIndex(val => val.includes('curr') || val === 'i');
         if(id==='liveMapTemp') sel.selectedIndex = h.findIndex(val => val.includes('temp'));
+        if(id==='liveMapSpeed') sel.selectedIndex = h.findIndex(val => val.includes('speed') || val === 's');
         if(id==='liveMapSoc') sel.selectedIndex = h.findIndex(val => val.includes('soc'));
     });
 });
@@ -59,6 +138,7 @@ async function trainLiveAI() {
         voltage: document.getElementById('liveMapVolts').value,
         current: document.getElementById('liveMapAmps').value,
         temp: document.getElementById('liveMapTemp').value,
+        speed: document.getElementById('liveMapSpeed').value,
         soc: document.getElementById('liveMapSoc').value
     };
     const statusMsg = document.getElementById('liveStatusMsg');
@@ -74,19 +154,18 @@ async function trainLiveAI() {
         if(d.status === 'success') {
             statusMsg.innerHTML = "✅ <span style='color:var(--accent-green)'>AI Connected & Predicting Live!</span>";
             aiLiveEnabled = true;
-            displaySoc = 100.0; // Reset Memory on new model
+            displaySoc = 100.0; 
             displayDuration = 9999;
         }
     } catch (err) { statusMsg.innerText = "❌ Error connecting AI."; }
 }
 
-// --- LIVE UPDATE LOOP ---
+// 4. Main Update Loop
 async function update() {
     try {
         const res = await fetch('/get_data');
         const data = await res.json();
         
-        // Connection Check
         lastDataTime = Date.now();
         document.getElementById('connStatus').innerText = "🟢 Connected";
         document.getElementById('connStatus').className = "status-badge connected";
@@ -94,13 +173,11 @@ async function update() {
         let rawSoc = data.soc;
         let rawDuration = 9999;
 
-        // Alerts
         let alertHTML = "";
         if (data.soc < 10.0) alertHTML += `<div class="alert alert-danger">⚠️ LOW VOLTAGE ALERT: Battery SoC is below 10%. Please charge!</div>`;
         if (data.temp >= 40.0) alertHTML += `<div class="alert alert-warning">🔥 OVERTEMP ALERT: Battery is overheating at ${data.temp.toFixed(1)}°C!</div>`;
         document.getElementById('alertContainer').innerHTML = alertHTML;
 
-        // --- AI PREDICTION OVERRIDE ---
         if (aiLiveEnabled && liveUid) {
             const pRes = await fetch('/predict', {
                 method: 'POST',
@@ -110,7 +187,8 @@ async function update() {
                     model_type: document.getElementById('liveMType').value,
                     voltage: data.voltage,
                     current: data.current,
-                    temp: data.temp
+                    temp: data.temp,
+                    speed: data.speed
                 })
             });
             const pData = await pRes.json();
@@ -120,17 +198,29 @@ async function update() {
             }
         }
 
-        // --- STRICT MONOTONIC MEMORY LOGIC (No Shuffling/Bouncing) ---
         if (rawSoc <= displaySoc) displaySoc = rawSoc;
         if (rawDuration <= displayDuration && rawDuration !== 9999) displayDuration = rawDuration;
 
-        // UI Updates
         document.getElementById('socDisplay').innerText = displaySoc.toFixed(1);
         document.getElementById('socBar').style.width = displaySoc + "%";
         document.getElementById('voltDisplay').innerText = data.voltage.toFixed(2);
         document.getElementById('tempDisplay').innerText = data.temp.toFixed(1);
+        document.getElementById('speedDisplay').innerText = data.speed.toFixed(2);
+        
+        document.getElementById('latDisplay').innerText = data.lat.toFixed(6);
+        document.getElementById('lngDisplay').innerText = data.lng.toFixed(6);
+        document.getElementById('satsDisplay').innerText = data.sats;
         
         document.getElementById('durationDisplay').innerText = (displayDuration === 9999) ? "--" : displayDuration;
+
+        // Map Update Logic
+        currentLat = data.lat;
+        currentLng = data.lng;
+        
+        if (currentLat !== 0.0 && currentLng !== 0.0) {
+            carMarker.setLatLng([currentLat, currentLng]);
+            map.panTo([currentLat, currentLng]); 
+        }
 
         updateLiveCurve();
     } catch (e) {}
@@ -153,4 +243,5 @@ async function toggleGeneration() {
 }
 
 initLiveChart();
+initMap(currentLat, currentLng); 
 setInterval(update, 1000);
