@@ -7,7 +7,9 @@ let aiLiveEnabled = false;
 let liveUid = null;
 
 let map, carMarker, destMarker;
-let currentLat = 22.8878, currentLng = 88.3974; 
+
+// UPDATED: Now points to your exact starting coordinates
+let currentLat = 22.95347, currentLng = 88.3759; 
 let mapInitialized = false;
 
 function initLiveChart() {
@@ -215,7 +217,6 @@ async function update() {
         if(document.getElementById('voltDisplay')) document.getElementById('voltDisplay').innerText = data.voltage.toFixed(2);
         if(document.getElementById('tempDisplay')) document.getElementById('tempDisplay').innerText = data.temp.toFixed(1);
         
-        // Python is now providing the true m/s speed directly, so we just display it!
         if(document.getElementById('speedDisplay')) {
             document.getElementById('speedDisplay').innerText = data.speed.toFixed(2);
         }

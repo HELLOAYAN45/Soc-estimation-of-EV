@@ -24,7 +24,6 @@ recording_session = []
 v_threshold = 9.0
 recording_start_time = None
 
-# --- In-Memory Caches for ML Models to prevent excessive disk I/O ---
 model_cache = {}
 scaler_cache = {}
 duration_map_cache = {}
@@ -53,8 +52,6 @@ def receive_data():
         i = round(float(data.get('current', 0.0)), 2)
         t = round(float(data.get('temp', 0.0)), 1)
         
-        # FIXED: Convert raw PWM (0-255) to physical m/s (Max 3.5) on the backend
-        # Now it saves correctly to both the CSV and the Dashboard
         raw_speed = float(data.get('speed', 0.0))
         MAX_PHYSICAL_SPEED_MPS = 3.5 
         s = round((raw_speed / 255.0) * MAX_PHYSICAL_SPEED_MPS, 2)
@@ -62,12 +59,12 @@ def receive_data():
         raw_lat = float(data.get('lat', 0.0))
         raw_lng = float(data.get('lng', 0.0))
 
+        # UPDATED: Now uses your exact coordinates as the default location
         if raw_lat == 0.0 and raw_lng == 0.0:
-            lat, lng, sats = 22.8878, 88.3974, 4
+            lat, lng, sats = 22.95347, 88.3759, 4
         else:
             lat, lng, sats = raw_lat, raw_lng, int(data.get('sats', 0))
 
-        # Basic linear SOC calculation fallback
         soc_calc = round(max(0, min(100, ((v - 9.0) / (12.6 - 9.0)) * 100)), 1)
 
         latest_sensor_data.update({
